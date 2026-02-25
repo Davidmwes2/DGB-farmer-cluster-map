@@ -35,9 +35,9 @@ df = load_live_data()
 def assign_strict_clusters(data, max_size=30, min_size=10):
     data = data.copy()
     data['Effective_Subcounty'] = data['Subcounty']
-    data['Is_Orphan'] = False  # Track who gets absorbed
+    data['Is_Orphan'] = False  
     
-    # STEP 1: Orphan Absorption (Merge <10 subcounties into nearest neighbor)
+    # STEP 1: Orphan Absorption 
     for dist in data['District'].unique():
         dist_mask = data['District'] == dist
         dist_data = data[dist_mask]
@@ -50,21 +50,17 @@ def assign_strict_clusters(data, max_size=30, min_size=10):
             valid_data = dist_data[dist_data['Subcounty'].isin(valid_subs)]
             orphan_data = dist_data[dist_data['Subcounty'].isin(orphan_subs)]
             
-            # Flag them as orphans
             data.loc[orphan_data.index, 'Is_Orphan'] = True
             
-            # Find the closest valid farmer for each orphan
             for idx, orphan in orphan_data.iterrows():
                 orphan_pt = [[orphan['Latitude'], orphan['Longitude']]]
                 valid_pts = valid_data[['Latitude', 'Longitude']].values
                 dists = distance.cdist(orphan_pt, valid_pts)
                 closest_valid_idx = dists.argmin()
                 closest_valid_sub = valid_data.iloc[closest_valid_idx]['Subcounty']
-                # Reassign the orphan to the neighbor's subcounty pool
                 data.loc[idx, 'Effective_Subcounty'] = closest_valid_sub
                 
         elif not valid_subs and len(dist_data) > 0:
-            # Fallback: If the ENTIRE district has tiny subcounties, merge them all
             data.loc[dist_mask, 'Effective_Subcounty'] = "MERGED"
             data.loc[dist_mask, 'Is_Orphan'] = True
 
@@ -133,6 +129,7 @@ search_query = st.sidebar.text_input("Find Farmer by Name", "")
 
 selected_dist = st.sidebar.selectbox("Filter by District", ["All Districts"] + sorted(full_data['District'].unique().tolist()))
 
+# Process Data Display View
 display_df = full_data.copy()
 if selected_dist != "All Districts":
     display_df = display_df[display_df['District'] == selected_dist]
@@ -146,6 +143,22 @@ if search_query:
     if not res.empty:
         zoom_lat, zoom_lon, zoom_level = res.iloc[0]['Latitude'], res.iloc[0]['Longitude'], 14
         st.sidebar.success(f"Located {res.iloc[0]['Name']}!")
+
+# =====================================================================
+# MAIN UI: HEADER & SUMMARY METRICS (Placed here to guarantee visibility)
+# =====================================================================
+st.title("🚜 DGB Farmer Geographic Hub")
+st.info("Logic: Bounded by Subcounty | Orphans absorbed by nearest valid neighbor | Max 30 farmers per hub.")
+
+# Summary KPI Row
+col1, col2, col3, col4 = st.columns(4)
+col1.metric(label="Total Farmers", value=f"{len(display_df):,}")
+col2.metric(label="Active Clusters", value=f"{len(lead_farmer_df):,}")
+col3.metric(label="Total Subcounties", value=f"{display_df['Subcounty'].nunique():,}")
+col4.metric(label="Total Parishes", value=f"{display_df['Parish'].nunique():,}")
+
+st.markdown("---")
+# =====================================================================
 
 # --- DOWNLOAD LOGIC ---
 def create_pdf(dataframe, lead_df):
@@ -177,27 +190,9 @@ if st.sidebar.button("🛠️ Prepare PDF Handbook"):
 csv_data = lead_farmer_df.to_csv(index=False).encode('utf-8')
 st.sidebar.download_button("📍 Download Hub Coordinates (CSV)", csv_data, "Hub_Coordinates.csv", "text/csv")
 
-# --- UI HEADER & SUMMARY METRICS ---
-st.title("🚜 DGB Farmer Geographic Hub")
-st.info("Logic: Bounded by Subcounty | Orphans absorbed by nearest valid neighbor | Max 30 farmers per hub.")
-
-# Add Summary KPI Row
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Total Farmers", f"{len(display_df):,}")
-with col2:
-    st.metric("Active Clusters", f"{len(lead_farmer_df):,}")
-with col3:
-    st.metric("Total Subcounties", f"{display_df['Subcounty'].nunique():,}")
-with col4:
-    st.metric("Total Parishes", f"{display_df['Parish'].nunique():,}")
-
-st.markdown("---")
-
 # --- MAP VISUALIZATION ---
 m = folium.Map(location=[zoom_lat, zoom_lon], zoom_start=zoom_level, tiles="cartodbpositron")
 
-# Complete color list
 colors = ['#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#fabed4', '#469990', '#dcbeff']
 color_map = {lbl: colors[i % len(colors)] for i, lbl in enumerate(sorted(display_df['Cluster_Label'].unique()))}
 
@@ -232,10 +227,9 @@ st_folium(m, width=1300, height=600)
 st.subheader("Cluster Registry & Hub Identification")
 st.dataframe(lead_farmer_df[['Cluster_ID', 'District', 'Lead_Farmer', 'Farmer_Count', 'Latitude', 'Longitude']], width="stretch")
 
-# Orphan Tracking Table
 st.markdown("---")
 st.subheader("⚠️ Orphaned Farmers (Reassigned)")
-st.markdown("These farmers belong to subcounties with fewer than 10 total registered farmers. To ensure viable meeting sizes, they have been geographically absorbed into a neighboring subcounty's cluster.")
+st.markdown("These farmers belong to subcounties with fewer than 10 total registered farmers. They have been geographically absorbed into a neighboring subcounty's cluster.")
 orphans_df = display_df[display_df['Is_Orphan'] == True]
 
 if not orphans_df.empty:
