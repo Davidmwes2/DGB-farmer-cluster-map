@@ -3,4 +3,5 @@ pandas
 folium
 streamlit-folium
 scikit-learn
+scipy
 fpdf
