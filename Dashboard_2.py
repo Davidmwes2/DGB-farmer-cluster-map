@@ -1,4 +1,3 @@
-import requests
 import streamlit as st
 import pandas as pd
 import folium
@@ -7,22 +6,35 @@ from sklearn.cluster import KMeans
 from scipy.spatial import distance
 from fpdf import FPDF
 import io
+import requests
 
 # 1. Page Config
 st.set_page_config(layout="wide", page_title="DGB Farmer Logistics Hub")
 
+# 2. Robust Live Data Loading
 @st.cache_data(ttl=600)
 def load_live_data():
-    sheet_url = "https://docs.google.com/spreadsheets/d/15V_IFm4Q14tMsg-vUV7r7IhtiGzNSjvBC58QkX9ydEY/export?format=csv&gid=0"
-    df = pd.read_csv(sheet_url)
-    df = df.rename(columns={'District_2': 'District', 'Subcounty_2': 'Subcounty', 'Parish_2': 'Parish'})
-    df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
-    df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
-    return df.dropna(subset=['Latitude', 'Longitude'])
+    sheet_id = "15V_IFm4Q14tMsg-vUV7r7IhtiGzNSjvBC58QkX9ydEY"
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+    
+    try:
+        response = requests.get(sheet_url)
+        if response.status_code != 200:
+            st.error(f"Google Sheets Access Denied (Error {response.status_code}). Check Sharing settings.")
+            st.stop()
+        
+        df = pd.read_csv(io.StringIO(response.text))
+        df = df.rename(columns={'District_2': 'District', 'Subcounty_2': 'Subcounty', 'Parish_2': 'Parish'})
+        df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
+        df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
+        return df.dropna(subset=['Latitude', 'Longitude'])
+    except Exception as e:
+        st.error(f"Connection Error: {e}")
+        st.stop()
 
 df = load_live_data()
 
-# --- STABLE CLUSTERING LOGIC ---
+# 3. Stable Clustering Logic
 def assign_stable_clusters(data, target_size=40):
     processed_list = []
     for dist in data['District'].unique():
@@ -31,6 +43,7 @@ def assign_stable_clusters(data, target_size=40):
         kmeans = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
         dist_data.loc[:, 'Cluster_ID_Num'] = kmeans.fit_predict(dist_data[['Latitude', 'Longitude']])
         centers = kmeans.cluster_centers_
+        
         dist_code = "HC" if "hoima city" in dist.lower() else dist[:2].upper()
         
         def get_label(row):
@@ -45,47 +58,66 @@ def assign_stable_clusters(data, target_size=40):
 
 full_data = assign_stable_clusters(df)
 
-# --- SIDEBAR: DOWNLOAD TOOLS ---
-st.sidebar.title("📦 Logistics Exports")
-selected_view = st.sidebar.selectbox("Filter by District", ["All"] + sorted(full_data['District'].unique().tolist()))
+# --- SIDEBAR & PDF LOGIC ---
+st.sidebar.title("📊 Field Reports")
+selected_view = st.sidebar.selectbox("Filter District", ["All"] + sorted(full_data['District'].unique().tolist()))
 view_df = full_data if selected_view == "All" else full_data[full_data['District'] == selected_view]
 
-# Calculate Centroids for the Map and Export
-centroids = view_df.groupby(['District', 'Cluster_Label']).agg({
-    'Latitude': 'mean', 
-    'Longitude': 'mean'
-}).reset_index()
+def create_pdf(dataframe):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    clusters = sorted(dataframe['Cluster_Label'].unique())
+    
+    for cluster in clusters:
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(200, 10, txt=f"DGB Field List: {cluster}", ln=True, align='C')
+        pdf.ln(5)
+        
+        # Table Header
+        pdf.set_font("Arial", 'B', 10)
+        pdf.set_fill_color(240, 240, 240)
+        pdf.cell(85, 10, "Farmer Name", border=1, fill=True)
+        pdf.cell(60, 10, "Parish", border=1, fill=True)
+        pdf.cell(45, 10, "Coordinates", border=1, fill=True)
+        pdf.ln()
+        
+        # Farmer Rows
+        pdf.set_font("Arial", size=9)
+        cluster_farmers = dataframe[dataframe['Cluster_Label'] == cluster]
+        for _, row in cluster_farmers.iterrows():
+            pdf.cell(85, 10, str(row['Name'])[:40], border=1)
+            pdf.cell(60, 10, str(row['Parish']), border=1)
+            pdf.cell(45, 10, f"{row['Latitude']:.4f}, {row['Longitude']:.4f}", border=1)
+            pdf.ln()
+    return pdf.output(dest='S').encode('latin-1')
 
-# Download Meeting Points CSV
-csv_centroids = centroids.to_csv(index=False).encode('utf-8')
-st.sidebar.download_button(
-    label="📍 Download Meeting Point CSV",
-    data=csv_centroids,
-    file_name=f"Meeting_Points_{selected_view}.csv",
-    mime="text/csv",
-    help="Download a list of central GPS coordinates for each cluster badge."
-)
+if st.sidebar.button("🛠️ Prepare PDF Handbook"):
+    pdf_output = create_pdf(view_df)
+    st.sidebar.download_button(
+        label="📥 Download PDF",
+        data=pdf_output,
+        file_name=f"Field_Report_{selected_view}.pdf",
+        mime="application/pdf"
+    )
 
 # --- MAP VISUALIZATION ---
-st.title(f"🌍 Farmer Network Hub: {selected_view}")
-
+st.title(f"🌍 Farmer Network Hub")
 m = folium.Map(location=[view_df['Latitude'].mean(), view_df['Longitude'].mean()], zoom_start=9, tiles="cartodbpositron")
 
-# Cluster Colors
+# Color Logic
 colors = ['#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6']
 color_map = {label: colors[i % len(colors)] for i, label in enumerate(sorted(view_df['Cluster_Label'].unique()))}
 
-# 1. Farmer Dots
 for _, row in view_df.iterrows():
     folium.CircleMarker(
         location=[row['Latitude'], row['Longitude']],
-        radius=4,
-        color=color_map[row['Cluster_Label']],
-        fill=True,
+        radius=4, color=color_map[row['Cluster_Label']], fill=True,
         tooltip=f"<b>{row['Name']}</b><br>ID: {row['Cluster_Label']}"
     ).add_to(m)
 
-# 2. Black Badge Meeting Points
+# Meeting Point Badges
+centroids = view_df.groupby('Cluster_Label').agg({'Latitude': 'mean', 'Longitude': 'mean'}).reset_index()
 for _, row in centroids.iterrows():
     label_num = row['Cluster_Label'].split('-')[-1]
     folium.Marker(
@@ -94,14 +126,13 @@ for _, row in centroids.iterrows():
             <div style="font-family: sans-serif; color: white; background: #000; 
             border-radius: 50%; width: 28px; height: 28px; display: flex; 
             align-items: center; justify-content: center; font-size: 8pt; 
-            font-weight: bold; border: 2px solid white; box-shadow: 0px 0px 5px rgba(0,0,0,0.5);">
-            {int(label_num)}</div>"""),
+            font-weight: bold; border: 2px solid white;">{int(label_num)}</div>"""),
         tooltip=f"MEETING POINT: {row['Cluster_Label']}"
     ).add_to(m)
 
 st_folium(m, width=1300, height=600)
 
 # --- REGISTRY TABLE ---
-st.subheader("Cluster Capacity Registry")
+st.subheader("Cluster Registry Summary")
 summary = full_data.groupby(['District', 'Cluster_Label']).size().reset_index(name='Farmer Count')
 st.dataframe(summary, width="stretch")
