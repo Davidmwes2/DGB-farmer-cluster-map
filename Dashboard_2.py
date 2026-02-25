@@ -177,12 +177,27 @@ if st.sidebar.button("🛠️ Prepare PDF Handbook"):
 csv_data = lead_farmer_df.to_csv(index=False).encode('utf-8')
 st.sidebar.download_button("📍 Download Hub Coordinates (CSV)", csv_data, "Hub_Coordinates.csv", "text/csv")
 
-# --- MAP VISUALIZATION ---
+# --- UI HEADER & SUMMARY METRICS ---
 st.title("🚜 DGB Farmer Geographic Hub")
 st.info("Logic: Bounded by Subcounty | Orphans absorbed by nearest valid neighbor | Max 30 farmers per hub.")
+
+# Add Summary KPI Row
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Total Farmers", f"{len(display_df):,}")
+with col2:
+    st.metric("Active Clusters", f"{len(lead_farmer_df):,}")
+with col3:
+    st.metric("Total Subcounties", f"{display_df['Subcounty'].nunique():,}")
+with col4:
+    st.metric("Total Parishes", f"{display_df['Parish'].nunique():,}")
+
+st.markdown("---")
+
+# --- MAP VISUALIZATION ---
 m = folium.Map(location=[zoom_lat, zoom_lon], zoom_start=zoom_level, tiles="cartodbpositron")
 
-# Complete color list (fixed from previous syntax error)
+# Complete color list
 colors = ['#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#fabed4', '#469990', '#dcbeff']
 color_map = {lbl: colors[i % len(colors)] for i, lbl in enumerate(sorted(display_df['Cluster_Label'].unique()))}
 
@@ -217,7 +232,7 @@ st_folium(m, width=1300, height=600)
 st.subheader("Cluster Registry & Hub Identification")
 st.dataframe(lead_farmer_df[['Cluster_ID', 'District', 'Lead_Farmer', 'Farmer_Count', 'Latitude', 'Longitude']], width="stretch")
 
-# NEW: Orphan Tracking Table
+# Orphan Tracking Table
 st.markdown("---")
 st.subheader("⚠️ Orphaned Farmers (Reassigned)")
 st.markdown("These farmers belong to subcounties with fewer than 10 total registered farmers. To ensure viable meeting sizes, they have been geographically absorbed into a neighboring subcounty's cluster.")
