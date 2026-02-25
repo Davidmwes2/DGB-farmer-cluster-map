@@ -178,4 +178,36 @@ st.title("🚜 DGB Farmer Geographic Hub")
 st.info("Logic: Bounded by Subcounty | Orphans absorbed by nearest valid neighbor | Max 30 farmers per hub.")
 m = folium.Map(location=[zoom_lat, zoom_lon], zoom_start=zoom_level, tiles="cartodbpositron")
 
-colors = ['#e6194b', '#3cb4
+colors = ['#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#fabed4', '#469990', '#dcbeff']
+color_map = {lbl: colors[i % len(colors)] for i, lbl in enumerate(sorted(display_df['Cluster_Label'].unique()))}
+
+for _, row in display_df.iterrows():
+    is_target = search_query and search_query.lower() in row['Name'].lower()
+    folium.CircleMarker(
+        location=[row['Latitude'], row['Longitude']],
+        radius=8 if is_target else 4,
+        color='black' if is_target else color_map[row['Cluster_Label']],
+        fill=True,
+        tooltip=f"<b>Farmer:</b> {row['Name']}<br><b>Actual Subcounty:</b> {row['Subcounty']}<br><b>Assigned Cluster:</b> {row['Cluster_Label']}"
+    ).add_to(m)
+
+for _, row in lead_farmer_df.iterrows():
+    label_num = row['Cluster_ID'].split('-')[-1]
+    banner_html = f"""
+    <div style="font-size: 11pt; padding: 2px;">
+        <b>Cluster Name:</b> {row['Cluster_ID']}<br>
+        <b>Headcount:</b> {row['Farmer_Count']} Farmers<br>
+        <b>Lead Farmer:</b> {row['Lead_Farmer']}
+    </div>
+    """
+    folium.Marker(
+        location=[row['Latitude'], row['Longitude']],
+        icon=folium.DivIcon(html=f'<div style="font-family: sans-serif; color: white; background: #000; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 9pt; font-weight: bold; border: 2px solid white; box-shadow: 2px 2px 5px rgba(0,0,0,0.4);">{int(label_num)}</div>'),
+        tooltip=folium.Tooltip(banner_html)
+    ).add_to(m)
+
+st_folium(m, width=1300, height=600)
+
+# --- REGISTRY TABLE ---
+st.subheader("Cluster Registry & Hub Identification")
+st.dataframe(lead_farmer_df[['Cluster_ID', 'District', 'Lead_Farmer', 'Farmer_Count', 'Latitude', 'Longitude']], width="stretch")
