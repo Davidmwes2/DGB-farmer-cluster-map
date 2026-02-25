@@ -7,4 +7,3 @@ scipy
 fpdf
 requests
 numpy
-math
