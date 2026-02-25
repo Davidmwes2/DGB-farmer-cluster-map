@@ -1,4 +1,4 @@
-# 🚜 DGB Farmer Logistics & Clustering Dashboard
+# 🚜Farmer Logistics & Clustering Dashboard
 
 This interactive web application is designed to manage and visualize farmer networks across 8 districts in Uganda. It uses geographic clustering (K-Means and Nearest Neighbor) to organize farmers into efficient groups for training, logistics, and monitoring.
 
